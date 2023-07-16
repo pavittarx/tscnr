@@ -1,14 +1,22 @@
-import yfinance as yf
 import pandas as pd
 import numpy as np
 
 from datetime import datetime, timedelta
 import pytz
 
-from config import timeframe, small_ema, large_ema, tickers
+from config import timeframe, small_ema, large_ema, tickers, candles_count, thresh_index
+from connector import MT5, get_candles_df
+from screener import get_threshold_for_ticker
 from sync import poller
 
+from dash import Dash, html, dash_table
+
+app = Dash(__name__)
+
 n_candles = large_ema * 2
+timezone = pytz.utc
+
+_tickers = []
 
 timeframe_secs_map = {
     "1M": 60,
@@ -30,11 +38,11 @@ def get_start_time(end_time, timeframe, n_candles):
 
 
 def predict_crossover(params):
-    df = params["df"]
+    df = params["df"].copy()
 
-    df["small_ema"] = df["Close"].ewm(span=small_ema, adjust=False).mean()
+    df["small_ema"] = df["close"].ewm(span=small_ema, adjust=False).mean()
 
-    df["large_ema"] = df["Close"].ewm(span=large_ema, adjust=False).mean()
+    df["large_ema"] = df["close"].ewm(span=large_ema, adjust=False).mean()
 
     df["small_ema"] = round(df["small_ema"], params["round_factor"])
     df["large_ema"] = round(df["large_ema"], params["round_factor"])
@@ -42,6 +50,8 @@ def predict_crossover(params):
     df["cross_diff"] = abs(df["large_ema"] - df["small_ema"])
 
     df["crossover_type"] = np.where(df["cross_diff"] > 0, "short", "long")
+
+    print("XX", df["cross_diff"], params["threshold"])
 
     df["crosspoint"] = np.where(df["cross_diff"] <= params["threshold"], True, False)
 
@@ -56,18 +66,20 @@ def predict_crossover(params):
         else:
             False
 
+    return df[-1:]
+
     return df[-1:] if filter_signal(df) else False
 
 
 def start():
     screened = []
-    for ticker in tickers:
+    for tick in _tickers:
         now = datetime.now(pytz.utc)
         start_time = get_start_time(now, timeframe, n_candles)
 
         print(
             "\n\n[INFO]: ",
-            ticker[0],
+            tick["ticker"],
             start_time,
             now,
             timeframe,
@@ -76,14 +88,23 @@ def start():
             "\n",
         )
 
-        candles = yf.download(ticker[0], start=start_time, end=now, interval=timeframe)
+        candles = MT5.get_candles(
+            {"ticker": tick["ticker"], "timeframe": timeframe, "count": large_ema * 2}
+        )
+
+        print("Candles", candles)
+
+        if candles is None:
+            raise Exception("No Candles Found: ", tick["ticker"])
+        else:
+            candles = get_candles_df(candles)
 
         params = {
             "df": candles,
             "small_ema": small_ema,
             "large_ema": large_ema,
-            "threshold": ticker[1],
-            "round_factor": ticker[2],
+            "threshold": tick["threshold"],
+            "round_factor": tick["round_factor"],
         }
 
         result = predict_crossover(params)
@@ -92,13 +113,13 @@ def start():
             result["dt"] = result.index
 
             res = {
-                "ticker": ticker[0],
-                "threshold": ticker[1],
+                "ticker": tick["ticker"],
+                "threshold": tick["threshold"],
                 "dt": result["dt"][0],
-                "open": result["Open"][0],
-                "close": result["Close"][0],
-                "high": result["High"][0],
-                "low": result["Low"][0],
+                "open": result["open"][0],
+                "close": result["close"][0],
+                "high": result["high"][0],
+                "low": result["low"][0],
                 "small_ema": result["small_ema"][0],
                 "large_ema": result["large_ema"][0],
                 "cross_diff": result["cross_diff"][0],
@@ -109,8 +130,45 @@ def start():
 
             screened.append(res)
 
-    print("\nScreened Tickers: \n", pd.DataFrame(screened))
+    screen_table = pd.DataFrame(screened)
+
+    app.layout = html.Div(
+        [
+            html.H1(
+                children="Screend Tickers",
+                style={"textAlign": "left", "fontFamily": "sans-serif"},
+            ),
+            dash_table.DataTable(
+                screen_table.to_dict("records"),
+                [{"name": i, "id": i} for i in screen_table.columns],
+                sort_action="native",
+            ),
+        ]
+    )
 
 
-th = poller(start, timeframe, 2)
+def init():
+    for tick in tickers:
+        _tickers.append(
+            get_threshold_for_ticker(
+                {
+                    "ticker": tick,
+                    "timeframe": timeframe,
+                    "count": candles_count,
+                    "thresh_index": thresh_index,
+                    "small_ema": small_ema,
+                    "large_ema": large_ema,
+                }
+            )
+        )
+
+    print("Tickers", _tickers)
+
+    poller(start, timeframe, 2)
+
+
 print("\n\n[INFO]: Polling started for timeframe: ", timeframe)
+init()
+
+if __name__ == "__main__":
+    app.run(debug=True)
