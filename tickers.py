@@ -1,6 +1,6 @@
 import pandas as pd
 
-from connector import MT5
+from connector import MT5, mt5
 from screener import get_crossover_candles, predict_threshold
 from config import timeframe, small_ema, large_ema, candles_count, thresh_index
 
@@ -10,9 +10,12 @@ app = Dash(__name__)
 
 
 def start():
-    symbols = MT5.get_tickers({})
+    symbols = MT5.get_tickers({"group": "*EUR*, *USD*, *AUD*"})
+
+    print(mt5.last_error())
 
     tickers = []
+    count = 1
 
     for sym in symbols:
         tickers.append({"ticker": sym.name, "round_factor": sym.digits})
@@ -23,12 +26,16 @@ def start():
             {
                 "ticker": tick["ticker"],
                 "timeframe": timeframe,
-                "candles_count": candles_count,
+                "count": candles_count,
                 "small_ema": small_ema,
                 "large_ema": large_ema,
                 "round_factor": tick["round_factor"],
             }
         )
+
+        if candles is None:
+            print(f"No Candles available: {tick['ticker']}")
+            continue
 
         threshold = predict_threshold(
             {
@@ -59,8 +66,6 @@ def start():
     )
 
 
-start()
-
-
 if __name__ == "__main__":
-    app.run(debug=True)
+    start()
+    app.run(debug=False, port=8000)

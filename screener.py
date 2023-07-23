@@ -6,6 +6,10 @@ from datetime import datetime
 from decimal import *
 import pytz
 
+from pprint import pprint as log
+
+import plotly.express as px
+
 
 # parameters
 # ticker, timeframe, count, small_ema, large_ema, round_factor
@@ -17,6 +21,9 @@ def get_crossover_candles(params):
             "count": params["count"],
         }
     )
+
+    if candles is None:
+        return None
 
     df = get_candles_df(candles)
 
@@ -49,29 +56,34 @@ def predict_threshold(params):
     df = params["candles"].copy()
 
     threshold_candles = []
+    thresh_diffs = []
 
     for i in range(0, len(df)):
         if df.iloc[i]["crosspoint"] == True:
-            threshold_candles.append(df.iloc[i - params["thresh_index"]])
+            row = df.iloc[i - params["thresh_index"]]
+            threshold_candles.append(row)
+            thresh_diffs.append(row['diff'])
 
-    freq = {}
+    # freq = {}
 
-    for candle in threshold_candles:
-        diff = candle["diff"]
-        key = int(round(diff, params["round_factor"]) * pow(10, params["round_factor"]))
+    # for candle in threshold_candles:
+    #     diff = candle["diff"]
+    #     key = int(round(diff, params["round_factor"]) * pow(10, params["round_factor"]))
 
-        if key in freq:
-            freq[key] = freq[key] + 1
-        else:
-            freq[key] = 1
+    #     if key in freq:
+    #         freq[key] = freq[key] + 1
+    #     else:
+    #         freq[key] = 1
+    
+    # max = [0, 0]
+    # for key in freq:
+    #     if freq[key] > max[1]:
+    #         max = [key, freq[key]]
 
-    max = [0, 0]
+    # print(len(threshold_candles), freq)
+    # return max[0] / pow(10, params["round_factor"]))
 
-    for key in freq:
-        if freq[key] > max[1]:
-            max = [key, freq[key]]
-
-    return max[0] / pow(10, params["round_factor"])
+    return round(np.percentile(thresh_diffs, 40), params['round_factor'])
 
 
 def get_threshold_for_ticker(params):
@@ -89,6 +101,8 @@ def get_threshold_for_ticker(params):
             "round_factor": tick["round_factor"],
         }
     )
+
+    # print("Candles: ", len(candles), len(candles[candles["crosspoint"] == True]))
 
     threshold = predict_threshold(
         {

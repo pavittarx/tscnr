@@ -51,8 +51,6 @@ def predict_crossover(params):
 
     df["crossover_type"] = np.where(df["cross_diff"] > 0, "short", "long")
 
-    print("XX", df["cross_diff"], params["threshold"])
-
     df["crosspoint"] = np.where(df["cross_diff"] <= params["threshold"], True, False)
 
     print(df[-5:], "\n\n")
@@ -66,13 +64,15 @@ def predict_crossover(params):
         else:
             False
 
-    return df[-1:]
+    # return df[-1:]
 
     return df[-1:] if filter_signal(df) else False
 
 
+screened = []
+
+
 def start():
-    screened = []
     for tick in _tickers:
         now = datetime.now(pytz.utc)
         start_time = get_start_time(now, timeframe, n_candles)
@@ -91,8 +91,6 @@ def start():
         candles = MT5.get_candles(
             {"ticker": tick["ticker"], "timeframe": timeframe, "count": large_ema * 2}
         )
-
-        print("Candles", candles)
 
         if candles is None:
             raise Exception("No Candles Found: ", tick["ticker"])
@@ -120,6 +118,7 @@ def start():
                 "close": result["close"][0],
                 "high": result["high"][0],
                 "low": result["low"][0],
+                "crossover_type": result["crossover_type"][0],
                 "small_ema": result["small_ema"][0],
                 "large_ema": result["large_ema"][0],
                 "cross_diff": result["cross_diff"][0],
@@ -142,6 +141,11 @@ def start():
                 screen_table.to_dict("records"),
                 [{"name": i, "id": i} for i in screen_table.columns],
                 sort_action="native",
+            )
+            if len(screen_table)
+            else html.H3(
+                children="No signals so far... Please wait.",
+                style={"textAlign": "left", "fontFamily": "sans-serif"},
             ),
         ]
     )
@@ -164,11 +168,20 @@ def init():
 
     print("Tickers", _tickers)
 
+    app.layout = html.Div(
+        [
+            html.H2(
+                children="Calculating Threshold ... Please wait!",
+                style={"textAlign": "left", "fontFamily": "sans-serif"},
+            ),
+        ]
+    )
+
     poller(start, timeframe, 2)
 
 
 print("\n\n[INFO]: Polling started for timeframe: ", timeframe)
-init()
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    init()
+    app.run(debug=False, port=8000)
